@@ -262,7 +262,7 @@ impl fmt::Display for ESignature {
         let bytes: [u8; 8] = unsafe { std::mem::transmute(self.uid) };
         write!(
             f,
-            "FlashSize({}KB) UID({})",
+            "ESIG FlashSize({}KB) UID({})",
             self.flash_size_kb,
             &bytes
                 .iter()

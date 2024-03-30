@@ -90,11 +90,12 @@ impl fmt::Display for AttachChipResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.chip_id == 0 {
             write!(f, "{:?}", self.chip_family)
-        } else if let Some(chip_name) = crate::chips::chip_id_to_chip_name(self.chip_id) {
+        } else if let Some(chip_info) = crate::chips::chip_id_to_chip_info(self.chip_id) {
             write!(
                 f,
-                "{:?} [{}] (ChipID: 0x{:08x})",
-                self.chip_family, chip_name, self.chip_id
+                "{:?} [{}] (ChipID: 0x{:08x}), Chip default size: SRAM {}KB, ZW & NZW Flash {}KB + {}KB",
+                self.chip_family, chip_info.name, self.chip_id,
+                chip_info.ram_size, chip_info.zw_flash_size, chip_info.nzw_flash_size
             )
         } else {
             write!(f, "{:?} (ChipID: 0x{:08x})", self.chip_family, self.chip_id)
