@@ -13,6 +13,7 @@ use crate::{
 pub struct ProbeSession {
     pub probe: WchLink,
     pub chip_family: RiscvChip,
+    pub chip_info: Option<crate::chips::ChipInfo>,
     pub speed: Speed,
 }
 
@@ -79,6 +80,7 @@ impl ProbeSession {
         Ok(ProbeSession {
             probe,
             chip_family: chip_info.chip_family,
+            chip_info: crate::chips::chip_id_to_chip_info(chip_info.chip_id),
             speed: speed,
         })
     }

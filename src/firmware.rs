@@ -38,13 +38,64 @@ pub enum Firmware {
     Sections(Vec<Section>),
 }
 
+pub fn check_page_empty(data: &[u8]) -> bool {
+    let data_u16 = data.chunks(2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    for (i, v) in data_u16.enumerate() {
+        if v != 0xffff && v != 0xe339 {
+            log::debug!("not a empty page: {:#x} at {}", v, i * 2);
+            return false;
+        }
+    }
+    return true;
+}
+
+// merge sections and fill with 0xFF
+pub fn merge_sections(sections: Vec<Section>) -> Result<Section> {
+    let mut it = sections.into_iter();
+    let mut last = it
+        .next()
+        .expect("firmware must has at least one section; qed");
+
+    for sect in it {
+        if let Some(gap) = sect.address.checked_sub(last.end_address()) {
+            if gap > 0 {
+                last.data.resize(last.data.len() + gap as usize, 0xFF);
+            }
+            last.data.extend_from_slice(&sect.data);
+        } else {
+            return Err(anyhow::anyhow!("section overlap"));
+        }
+    }
+    Ok(last)
+}
+
+// split a section to two sections with offset
+pub fn split_section(section: Section, offset: u32) -> Result<Vec<Section>> {
+    if (offset % 256 != 0) || (section.address % 256 != 0) {
+        return Err(anyhow::anyhow!("section address not aligned"));
+    }
+    if (offset == 0) || (section.data.len() == offset as usize) {
+        return Err(anyhow::anyhow!("section offset is 0 or equal to section length"));
+    }
+    let first_section = Section {
+        address: section.address,
+        data: section.data[0..offset as usize].to_vec(),
+    };
+    let second_section = Section {
+        address: section.address + offset,
+        data: section.data[offset as usize..].to_vec(),
+    };
+    Ok(vec![first_section, second_section])
+}
+
 impl Firmware {
-    /// Merge sections, and fill gap with 0xff
-    pub fn merge_sections(self) -> Result<Self> {
+    /// Merge sections w/ <= 256 bytes gap and align to 256 bytes
+    pub fn perprocess_sections(self) -> Result<Self> {
         if let Firmware::Sections(mut sections) = self {
             sections.sort_by_key(|s| s.address);
-            let mut merged = vec![];
+            let mut processed_sections = vec![];
 
+            // merge sections which has gap less than 256 bytes
             let mut it = sections.drain(0..);
             let mut last = it
                 .next()
@@ -52,11 +103,14 @@ impl Firmware {
 
             for sect in it {
                 if let Some(gap) = sect.address.checked_sub(last.end_address()) {
-                    if gap > 0 {
-                        log::debug!("Merge firmware sections with gap: {}", gap);
+                    if gap > 256 {
+                        processed_sections.push(last);
+                        last = sect.clone();
+                        continue;
+                    } else {
+                        last.data.resize(last.data.len() + gap as usize, 0xFF);
+                        last.data.extend_from_slice(&sect.data);
                     }
-                    last.data.resize(last.data.len() + gap as usize, 0xff); // fill gap with 0xff
-                    last.data.extend_from_slice(&sect.data);
                 } else {
                     return Err(anyhow::format_err!(
                         "section address overflow: {:#010x} + {:#x}",
@@ -65,8 +119,20 @@ impl Firmware {
                     ));
                 }
             }
-            merged.push(last);
-            Ok(Firmware::Sections(merged))
+            processed_sections.push(last);
+
+            // align each section to 256 bytes via adding 0xFF at the front
+            let mut sections = processed_sections.clone();
+            let it = sections.drain(0..);
+            processed_sections.clear();
+            for mut sect in it {
+                while sect.address % 256 != 0 {
+                    sect.data.insert(0, 0xFF);
+                    sect.address -= 1;
+                }
+                processed_sections.push(sect);
+            }
+            Ok(Firmware::Sections(processed_sections))
         } else {
             Ok(self)
         }
@@ -90,9 +156,9 @@ pub fn read_firmware_from_file<P: AsRef<Path>>(path: P) -> Result<Firmware> {
         }
         FirmwareFormat::Binary => Ok(Firmware::Binary(raw)),
         FirmwareFormat::IntelHex => {
-            read_ihex(str::from_utf8(&raw)?).and_then(|f| f.merge_sections())
+            read_ihex(str::from_utf8(&raw)?).and_then(|f| f.perprocess_sections())
         }
-        FirmwareFormat::ELF => read_elf(&raw).and_then(|f| f.merge_sections()),
+        FirmwareFormat::ELF => read_elf(&raw).and_then(|f| f.perprocess_sections()),
     }
 }
 
@@ -111,8 +177,8 @@ fn guess_format(path: &Path, raw: &[u8]) -> FirmwareFormat {
         FirmwareFormat::ELF
     } else if raw[0] == b':'
         && raw
-            .iter()
-            .all(|&c| (c as char).is_ascii_hexdigit() || c == b':' || c == b'\n' || c == b'\r')
+        .iter()
+        .all(|&c| (c as char).is_ascii_hexdigit() || c == b':' || c == b'\n' || c == b'\r')
     {
         FirmwareFormat::IntelHex
     } else if raw

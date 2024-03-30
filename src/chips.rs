@@ -1,6 +1,7 @@
 //! The chip DB.
 //! These ids are from the note of function `GetCHIPID` in EVT code, or from datasheet.
 
+#[derive(Copy, Clone)]
 pub struct ChipInfo {
     pub name: &'static str,
     pub ram_size: u32,

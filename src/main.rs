@@ -4,7 +4,7 @@ use anyhow::Result;
 use wlink::{
     commands,
     dmi::DebugModuleInterface,
-    firmware::{read_firmware_from_file, Firmware},
+    firmware::{read_firmware_from_file, merge_sections, Section, Firmware},
     operations::ProbeSession,
     probe::WchLink,
     regs, RiscvChip,
@@ -347,19 +347,46 @@ fn main() -> Result<()> {
                             sess.write_flash(&data, start_address)?;
                         }
                         Firmware::Sections(sections) => {
-                            // Flash section by section
                             if address != None {
                                 log::warn!("--address is ignored when flashing ELF or ihex");
                             }
-                            for section in sections {
-                                let start_address =
-                                    sess.chip_family.fix_code_flash_start(section.address);
-                                log::info!(
-                                    "Flashing {} bytes to 0x{:08x}",
-                                    section.data.len(),
-                                    start_address
-                                );
-                                sess.write_flash(&section.data, start_address)?;
+                            let chip_info = sess.chip_info.ok_or(
+                                wlink::Error::Custom("Cannot find the information of this chip".to_string()))?;
+                            let chip_info = chip_info.clone();
+                            let zw_addr_end_addr =
+                                sess.chip_family.fix_code_flash_start(chip_info.zw_flash_size).clone();
+                            // let nzw_addr_end_addr =
+                            //     sess.chip_family.fix_code_flash_start(chip_info.zw_flash_size + chip_info.nzw_flash_size);
+                            if chip_info.zw_flash_size != 0 {
+                                // flash the sections in zw one by one
+                                for section in &sections {
+                                    let start_address =
+                                        sess.chip_family.fix_code_flash_start(section.address);
+                                    let end_address = start_address + section.data.len() as u32;
+                                    if end_address > zw_addr_end_addr {
+                                        break;
+                                    }
+                                    log::info!(
+                                        "Flashing {} bytes to 0x{:08x}",
+                                        section.data.len(),
+                                        start_address
+                                    );
+                                    sess.write_flash(&section.data, start_address)?;
+                                }
+                            }
+                            if chip_info.nzw_flash_size != 0 {
+                                // merge the sections in nzw and flash them together
+                                let mut sections_in_nzw: Vec<Section> = vec![];
+                                for section in sections {
+                                    let start_address =
+                                        sess.chip_family.fix_code_flash_start(section.address);
+                                    let end_address = start_address + section.data.len() as u32;
+                                    if end_address > zw_addr_end_addr {
+                                        sections_in_nzw.push(section.clone());
+                                    }
+                                }
+                                let nzw_section = merge_sections(sections_in_nzw)?;
+                                sess.write_flash(&nzw_section.data, nzw_section.address)?;
                             }
                         }
                     }
