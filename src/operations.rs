@@ -286,8 +286,8 @@ impl ProbeSession {
             if rxbuf[3] != 0x04 {
                 return Err(Error::Custom(format!(
                     // 0x05, 0x18, 0xff
-                    "Error while fastprogram: {:02x?}",
-                    rxbuf
+                    "Error while fastprogram: {:02x?} at {}",
+                    rxbuf, bar.position(),
                 )));
             }
         }
