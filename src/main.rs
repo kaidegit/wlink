@@ -357,49 +357,103 @@ fn main() -> Result<()> {
                                 sess.chip_family.fix_code_flash_start(chip_info.zw_flash_size * 1024).clone();
                             // let nzw_addr_end_addr =
                             //     sess.chip_family.fix_code_flash_start(chip_info.zw_flash_size + chip_info.nzw_flash_size);
+                            let mut flash_time: u32 = 0;
                             if chip_info.zw_flash_size != 0 {
-                                log::info!("Start to flash zw part");
-                                // flash the sections in zw one by one
+                                // check if any section is in zw area
+                                let mut is_sth_in_zw_area = false;
+                                for section in &sections {
+                                    let start_address =
+                                        sess.chip_family.fix_code_flash_start(section.address);
+                                    let end_address = start_address + section.data.len() as u32;
+                                    if end_address < zw_addr_end_addr {
+                                        is_sth_in_zw_area = true;
+                                        break;
+                                    }
+                                }
+                                if !is_sth_in_zw_area {
+                                    log::info!("No section is in zw area, skip flashing zw part");
+                                } else {
+                                    log::info!("Start to flash zw part");
+                                    let mut last_pack_len = 0;
+                                    let mut offset = 0;
+                                    // flash the sections in zw one by one
+                                    for section in &sections {
+                                        let start_address =
+                                            sess.chip_family.fix_code_flash_start(section.address);
+                                        let end_address = start_address + section.data.len() as u32;
+                                        if end_address > zw_addr_end_addr {
+                                            break;
+                                        }
+                                        log::info!(
+                                            "Flashing {} bytes to 0x{:08x}",
+                                            section.data.len(),
+                                            start_address
+                                        );
+                                        offset += ((last_pack_len + 4095) / 4096) * 4096;
+                                        log::info!("offset: 0x{:08x}", offset);
+                                        sess.write_flash(&section.data, start_address - offset)?;
+                                        last_pack_len = section.data.len() as u32;
+                                        // if flash_time == 0 {    // write to 0x0
+                                        //     sess.write_flash(&section.data, start_address)?;
+                                        // } else if flash_time == 1 {
+                                        //     // write to 0x0802e000
+                                        //     // sess.write_flash(&section.data, start_address - 0x2000)?;   // 0x2c000
+                                        //     // write to 0x0802a000
+                                        //     sess.write_flash(&section.data, start_address - 0x4000 - 0x2000)?;   // 0x2c000
+                                        // } else if flash_time == 2 {
+                                        //     // write to 0x08037800
+                                        //     // sess.write_flash(&section.data, start_address - 0xb000)?;   // 0x2c800
+                                        //     // write to 0x08037000
+                                        //     sess.write_flash(&section.data, 0x08037000 - 0xb000)?;
+                                        //     // write to 0x08040000
+                                        //     sess.write_flash(&section.data, 0x08040000 - 0xc000)?;
+                                        //     // write to 0x08050000
+                                        //     sess.write_flash(&section.data, 0x08050000 - 0xd000)?;
+                                        // }
+                                        // flash_time += 1;
+                                    }
+                                }
+                            }
+                            // sess.soft_reset()?;
+                            if chip_info.nzw_flash_size != 0 {
+                                // check if any section is in nzw area
+                                let mut is_sth_in_nzw_area = false;
                                 for section in &sections {
                                     let start_address =
                                         sess.chip_family.fix_code_flash_start(section.address);
                                     let end_address = start_address + section.data.len() as u32;
                                     if end_address > zw_addr_end_addr {
+                                        is_sth_in_nzw_area = true;
                                         break;
                                     }
-                                    log::info!(
-                                        "Flashing {} bytes to 0x{:08x}",
-                                        section.data.len(),
-                                        start_address
-                                    );
-                                    sess.write_flash(&section.data, start_address)?;
                                 }
-                            }
-                            // sess.soft_reset()?;
-                            if chip_info.nzw_flash_size != 0 {
-                                // merge the sections in nzw and flash them together
-                                let mut sections_in_nzw: Vec<Section> = vec![];
-                                for section in sections {
-                                    let start_address =
-                                        sess.chip_family.fix_code_flash_start(section.address);
-                                    let end_address = start_address + section.data.len() as u32;
-                                    if end_address > zw_addr_end_addr {
-                                        sections_in_nzw.push(section.clone());
-                                        // log::info!("Adding section {:?} to nzw", section);
+                                if !is_sth_in_nzw_area {
+                                    log::info!("No section is in nzw area, skip flashing nzw part");
+                                } else {
+                                    log::info!("Start to flash nzw part");
+                                    // merge the sections in nzw and flash them together
+                                    let mut sections_in_nzw: Vec<Section> = vec![];
+                                    for section in &sections {
+                                        let start_address =
+                                            sess.chip_family.fix_code_flash_start(section.address);
+                                        let end_address = start_address + section.data.len() as u32;
+                                        if end_address > zw_addr_end_addr {
+                                            sections_in_nzw.push(section.clone());
+                                            // log::info!("Adding section {:?} to nzw", section);
+                                        }
                                     }
-                                }
-                                let nzw_section = merge_sections(sections_in_nzw)?;
-                                let start_address = sess.chip_family.fix_code_flash_start(nzw_section.address);
-                                log::info!(
+                                    let nzw_section = merge_sections(sections_in_nzw)?;
+                                    let start_address = sess.chip_family.fix_code_flash_start(nzw_section.address);
+                                    log::info!(
                                         "Flashing {} bytes to 0x{:08x}",
                                         nzw_section.data.len(),
                                         start_address
                                     );
-                                // log::info!("nzw_section: {:?}", nzw_section);
-                                // sess.write_flash(&nzw_section.data, start_address)?;
-                                // FIXME find where i am wrong with a offset
-                                sess.write_flash(&nzw_section.data, start_address - 0x2000)?;
-
+                                    // log::info!("nzw_section: {:?}", nzw_section);
+                                    // sess.write_flash(&nzw_section.data, start_address)?;
+                                    // FIXME find where i am wrong with a offset
+                                    sess.write_flash(&nzw_section.data, start_address - 0x2000)?;
+                                }
                             }
                         }
                     }
