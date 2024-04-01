@@ -39,7 +39,7 @@ pub enum Firmware {
 }
 
 impl Firmware {
-    /// Merge sections w/ <= 256 bytes gap
+    /// Merge sections w/ <= 4096 bytes gap
     pub fn merge_sections(self) -> Result<Self> {
         if let Firmware::Sections(mut sections) = self {
             sections.sort_by_key(|s| s.address);
@@ -51,7 +51,7 @@ impl Firmware {
                 .expect("firmware must has at least one section; qed");
             for sect in it {
                 if let Some(gap) = sect.address.checked_sub(last.end_address()) {
-                    if gap > 256 {
+                    if gap > 4096 {
                         merged.push(last);
                         last = sect.clone();
                         continue;
