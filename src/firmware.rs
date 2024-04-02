@@ -56,7 +56,7 @@ impl Firmware {
                         last = sect.clone();
                         continue;
                     } else {
-                        last.data.resize(last.data.len() + gap as usize, 0);
+                        last.data.resize(last.data.len() + gap as usize, 0xFF);
                         last.data.extend_from_slice(&sect.data);
                     }
                 } else {
